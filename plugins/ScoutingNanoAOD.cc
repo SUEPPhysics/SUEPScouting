@@ -333,7 +333,11 @@ private:
   float eventBoosted_circularity;
   float eventBoosted_sphericity;
   float eventBoosted_thrust;
-
+    
+  float suepJetBoosted_isotropy;
+  float suepJetBoosted_circularity;
+  float suepJetBoosted_sphericity;
+  float suepJetBoosted_thrust;
         
   // TTree carrying the event weight information
   TTree* tree;
@@ -548,6 +552,11 @@ ScoutingNanoAOD::ScoutingNanoAOD(const edm::ParameterSet& iConfig):
   tree->Branch("eventBoosted_circularity"     ,&eventBoosted_circularity  );
   tree->Branch("eventBoosted_sphericity"      ,&eventBoosted_sphericity   );
   tree->Branch("eventBoosted_thrust"          ,&eventBoosted_thrust       );
+      
+  tree->Branch("suepJetBoosted_isotropy"        ,&suepJetBoosted_isotropy     );
+  tree->Branch("suepJetBoosted_circularity"     ,&suepJetBoosted_circularity  );
+  tree->Branch("suepJetBoosted_sphericity"      ,&suepJetBoosted_sphericity   );
+  tree->Branch("suepJetBoosted_thrust"          ,&suepJetBoosted_thrust       );
 
 }
 
@@ -1145,20 +1154,6 @@ for(int e = 0; e < static_cast<int>(PFcand_pt.size()); e++){//loop over pf cands
  event_sphericity  = event_algo.sphericity();
  event_circularity = event_algo.circularity();
 
- // done for suep jet (not boosted)
- vector<math::XYZVector> suep_tracks; // tracks associated to highest multplicity jet
- if (maxNconstit > 0 ){
-    for (auto suep_trk : suepJet.constituents() ){
-       trk = math::XYZVector(0,0,0);
-       trk.SetXYZ(suep_trk.px(), suep_trk.py(), suep_trk.pz() );
-       suep_tracks.push_back(trk);
-    }
- }
- EventShapeVariables suep_algo(suep_tracks);
- suepJet_isotropy    = suep_algo.isotropy();
- suepJet_sphericity  = suep_algo.sphericity();
- suepJet_circularity = suep_algo.circularity();
-
  /*
  // done for event, after boosting & removing ISR w/in delta phi
  if (maxNconstit > 0) {
@@ -1195,47 +1190,81 @@ for(int e = 0; e < static_cast<int>(PFcand_pt.size()); e++){//loop over pf cands
  n_bpfcand = 0;
 
  if (n_fatjet>1){
-   vector<math::XYZVector> boost_tracks; // after boost with deltaphi removal 
+    vector<math::XYZVector> boost_tracks; // after boost with deltaphi removal 
 
     TLorentzVector suep_p4 = TLorentzVector();
     TLorentzVector isr_p4 = TLorentzVector();
-    if (suepJet.pt() > FatJet_pt[1]){
-      suep_p4.SetPtEtaPhiM(suepJet.pt(), suepJet.eta(), suepJet.phi_std(), suepJet.m());
-      isr_p4.SetPtEtaPhiM(FatJet_pt[1], FatJet_eta[1], FatJet_phi[1], FatJet_mass[1]);
+          
+    // SUEP jet as highest mult of top two pT jets, ISR as the second
+    if(FatJet_nconst[0] > FatJet_nconst[1]){
+        suep_p4.SetPtEtaPhiM(FatJet_pt[0], FatJet_eta[0], FatJet_phi[0], FatJet_mass[0]);
+        isr_p4.SetPtEtaPhiM(FatJet_pt[1], FatJet_eta[1], FatJet_phi[1], FatJet_mass[1]);
+        suepJet = ak15_jets[0];
     }
     else{
-      suep_p4.SetPtEtaPhiM(suepJet.pt(), suepJet.eta(), suepJet.phi_std(), suepJet.m());
-      isr_p4.SetPtEtaPhiM(FatJet_pt[0], FatJet_eta[0], FatJet_phi[0], FatJet_mass[0]);
-
+        suep_p4.SetPtEtaPhiM(FatJet_pt[1], FatJet_eta[1], FatJet_phi[1], FatJet_mass[1]);
+        isr_p4.SetPtEtaPhiM(FatJet_pt[0], FatJet_eta[0], FatJet_phi[0], FatJet_mass[0]); 
+        suepJet = ak15_jets[1];
     }
     TVector3 boost_pt = suep_p4.BoostVector();
     isr_p4.Boost(-boost_pt);
+          
+    // done for suep jet (not boosted)
+    vector<math::XYZVector> suep_tracks; // tracks associated to highest multplicity jet
+    if (suepJet.constituents().size() > 0 ){
+        for (auto suep_trk : suepJet.constituents() ){
+            trk = math::XYZVector(0,0,0);
+            trk.SetXYZ(suep_trk.px(), suep_trk.py(), suep_trk.pz() );
+            suep_tracks.push_back(trk);
+        }
+    }
+    EventShapeVariables suep_algo(suep_tracks);
+    suepJet_isotropy    = suep_algo.isotropy();
+    suepJet_sphericity  = suep_algo.sphericity();
+    suepJet_circularity = suep_algo.circularity();
 
+    // done for suep jet (boosted)
+    vector<math::XYZVector> boosted_suep_tracks;
+    if (suepJet.constituents().size() > 0 ){
+        for (auto suep_trk : suepJet.constituents() ){
+            TLorentzVector trk_p4 = TLorentzVector();
+            trk_p4.SetPtEtaPhiM(suep_trk.pt(), suep_trk.eta(), suep_trk.phi_std(), suep_trk.m());
+            trk_p4.Boost(-boost_pt);
+            if (isnan(trk_p4.Phi()) || isnan(isr_p4.Phi())) continue;
+            
+            trk.SetXYZ(trk_p4.Px(), trk_p4.Py(), trk_p4.Pz());
+            boosted_suep_tracks.push_back(trk);
+        }
+    }
+    EventShapeVariables boosted_suep_algo(boosted_suep_tracks);
+    suepJetBoosted_isotropy    = boosted_suep_algo.isotropy();
+    suepJetBoosted_sphericity  = boosted_suep_algo.sphericity();
+    suepJetBoosted_circularity = boosted_suep_algo.circularity();
+     
+    // and now for the whole event
     for (auto evt_trk : fj_part ){
         TLorentzVector trk_p4 = TLorentzVector();
         trk_p4.SetPtEtaPhiM( evt_trk.pt(), evt_trk.eta(), evt_trk.phi_std(), evt_trk.m());
         trk_p4.Boost(-boost_pt);
+        if (isnan(trk_p4.Phi()) || isnan(isr_p4.Phi())) continue;
+        
+        bPFcand_pt.push_back(trk_p4.Pt());
+        bPFcand_eta.push_back(trk_p4.Eta());
+        bPFcand_phi.push_back(trk_p4.Phi());
+        bPFcand_m.push_back(trk_p4.M());
+        bPFcand_pdgid.push_back(PFcand_pdgid[(UInt_t)evt_trk.user_index()]);
 
-	if (isnan(trk_p4.Phi()) || isnan(isr_p4.Phi())){
-	  continue;
-	}
-        if ( abs(trk_p4.DeltaPhi(isr_p4)) < 1.6 ) continue;
-
-	bPFcand_pt.push_back(trk_p4.Pt());
-	bPFcand_eta.push_back(trk_p4.Eta());
-	bPFcand_phi.push_back(trk_p4.Phi());
-	bPFcand_m.push_back(trk_p4.M());
-	bPFcand_pdgid.push_back(PFcand_pdgid[(UInt_t)evt_trk.user_index()]);
-
-        //trk.SetXYZ(evt_trk.px(), evt_trk.py(), evt_trk.pz() );
-        trk.SetXYZ(trk_p4.Px(), trk_p4.Py(), trk_p4.Pz() );
+        trk = math::XYZVector(0,0,0);
+        trk.SetXYZ(trk_p4.Px(), trk_p4.Py(), trk_p4.Pz());
         boost_tracks.push_back(trk);
-	n_bpfcand += 1;
+        
+        n_bpfcand += 1;
     }
     EventShapeVariables boost_algo(boost_tracks);
     eventBoosted_isotropy    = boost_algo.isotropy();
     eventBoosted_sphericity  = boost_algo.sphericity();
     eventBoosted_circularity = boost_algo.circularity();
+     
  }
 
   
