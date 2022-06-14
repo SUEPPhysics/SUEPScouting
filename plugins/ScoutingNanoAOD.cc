@@ -817,7 +817,8 @@ void ScoutingNanoAOD::analyze(const edm::Event& iEvent, const edm::EventSetup& i
     n_pfcand++;
   }
 
-if(false){  //do not run for data
+if(isMC){  //do not run for data
+  
   Handle<vector<reco::GenParticle> > genP;
   iEvent.getByToken(gensToken, genP);
 

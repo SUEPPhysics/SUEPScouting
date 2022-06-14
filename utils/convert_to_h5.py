@@ -1,4 +1,5 @@
 from __future__ import print_function, division
+from operator import ne
 import os
 import argparse
 import uproot
@@ -14,9 +15,16 @@ def store_objects_coordinates(arrays, nentries, nobj=10, obj='FatJet_'):
     '''store objects in zero-padded numpy arrays'''
     l1Obj_cyl = np.zeros((nentries,nobj,3))
     l1Obj_cart = np.zeros((nentries,nobj,3))
-    pt = to_np_array(arrays['{}pt'.format(obj)],maxN=nobj)
-    eta = to_np_array(arrays['{}eta'.format(obj)],maxN=nobj)
-    phi = to_np_array(arrays['{}phi'.format(obj)],maxN=nobj)
+
+    if 'PFcand_' == obj:
+        cut = (arrays["{}q".format(obj)] != 0) & (arrays["{}vertex".format(obj)] == 0) & (abs(arrays["{}eta".format(obj)]) < 2.4) & (arrays["{}pt".format(obj)]>0.5)
+        pt = to_np_array(arrays['{}pt'.format(obj)][cut],maxN=nobj)
+        eta = to_np_array(arrays['{}eta'.format(obj)][cut],maxN=nobj)
+        phi = to_np_array(arrays['{}phi'.format(obj)][cut],maxN=nobj)
+    else:
+        pt = to_np_array(arrays['{}pt'.format(obj)],maxN=nobj)
+        eta = to_np_array(arrays['{}eta'.format(obj)],maxN=nobj)
+        phi = to_np_array(arrays['{}phi'.format(obj)],maxN=nobj)
     l1Obj_cyl[:,:,0] = pt
     l1Obj_cyl[:,:,1] = eta
     l1Obj_cyl[:,:,2] = phi
@@ -34,9 +42,22 @@ def store_objects_truth(arrays, nentries, nobj=10, obj='FatJet_'):
     
     return l1Obj_truth
 
+def store_event_features(arrays, nentries):
+    '''store objects in zero-padded numpy arrays'''
+    l1Oevent_features = np.zeros((nentries,3))
+    n_pfcand = to_np_array(arrays['n_pfcand'], maxN=nentries)
+    eventBoosted_sphericity = to_np_array(arrays['eventBoosted_sphericity'], maxN=nentries)
+    suepJetBoosted_sphericity = to_np_array(arrays['suepJetBoosted_sphericity'], maxN=nentries)
+
+    l1Oevent_features[:,0] = n_pfcand
+    l1Oevent_features[:,1] = eventBoosted_sphericity
+    l1Oevent_features[:,2] = suepJetBoosted_sphericity
+    
+    return l1Oevent_features
+
 def store_objects_addfeatures(arrays, nentries, nobj=10, obj='FatJet_'):
     '''store objects in zero-padded numpy arrays'''
-    l1Obj_features = np.zeros((nentries,nobj,2))
+    l1Obj_features = np.zeros((nentries,nobj,6))
     pdgid = to_np_array(arrays['{}pdgid'.format(obj)],maxN=nobj)
     fjidx = to_np_array(arrays['{}fjidx'.format(obj)],maxN=nobj)
     l1Obj_features[:,:,0] = pdgid
@@ -75,25 +96,32 @@ def convert_event_based(input_file, output_file, tree_name):
     nphotons = 20
     npfcands=1000
 
-    
     cylNames = [b'pt', b'eta', b'phi']
     cartNames = [b'px', b'py', b'pz']
 
     # variables to retrieve
     varList = ['n_jet','n_fatjet','n_pho',
-               'n_ele', 'n_mu', 'n_pfcand', 'n_bpfcand']
+               'n_ele', 'n_mu', 'n_pfcand', 'n_bpfcand',
+               'eventBoosted_sphericity', 'suepJetBoosted_sphericity']
     common_prop = ['pt','eta','phi']
     varList += ['Electron_'+p for p in common_prop+['m']]
     varList += ['Photon_'+p for p in common_prop+['m']]
     varList += ['Muon_'+p for p in common_prop+['m']]
     varList += ['Jet_'+p for p in common_prop+['m']]
     varList += ['FatJet_'+p for p in common_prop+['mass','msoftdrop', 'mtrim']]
-    varList += ['PFcand_'+p for p in common_prop+['m','pdgid','fjidx','fromsuep']]
+    varList += ['PFcand_'+p for p in common_prop+['m','pdgid','fjidx','fromsuep','q','vertex','eta','pt']]
     varList += ['bPFcand_'+p for p in common_prop+['m']]
-
 
     # get awkward arrays
     arrays = l1Tree.arrays(varList)
+
+    # apply selections
+    sel_arrays = l1Tree.arrays(['ht', 'n_fatjet'])
+    ht = sel_arrays['ht']
+    n_fatjet = sel_arrays['n_fatjet']
+    cut = (ht>500) & (n_fatjet >= 2)
+    arrays = arrays[cut]  
+    nentries = np.count_nonzero(cut)
 
     # store objects: jets, muons, electrons
     l1Jet_cyl, l1Jet_cart = store_objects_coordinates(arrays, nentries, nobj=njets, obj='Jet_')
@@ -105,7 +133,7 @@ def convert_event_based(input_file, output_file, tree_name):
     l1pfcand_feat = store_objects_addfeatures(arrays, nentries, nobj=npfcands, obj='PFcand_')
     l1pfcand_truth = store_objects_truth(arrays, nentries, nobj=npfcands, obj='PFcand_')
     l1bpfcand_cyl, l1bpfcand_cart = store_objects_coordinates(arrays, nentries, nobj=npfcands, obj='bPFcand_')
-
+    l1event_feat = store_event_features(arrays, nentries)
     
     with h5py.File(output_file, 'w') as outFile:
         outFile.create_dataset('FeatureNames_cyl', data=cylNames, compression='gzip')
@@ -126,6 +154,7 @@ def convert_event_based(input_file, output_file, tree_name):
         outFile.create_dataset('Pfcand_truth', data=l1pfcand_truth, compression='gzip')
         outFile.create_dataset('bPfcand_cyl', data=l1bpfcand_cyl, compression='gzip')
         outFile.create_dataset('bPfcand_cart', data=l1bpfcand_cart, compression='gzip')
+        outFile.create_dataset('event_feat', data=l1event_feat, compression='gzip')
 
 def convert_jet_based(input_file, output_file, tree_name):
     inFile = uproot.open(input_file)
@@ -147,7 +176,15 @@ def convert_jet_based(input_file, output_file, tree_name):
     varList+=varPfcands
     
     # get awkward arrays
-    arrays = l1Tree.arrays(varList)    
+    arrays = l1Tree.arrays(varList)
+
+    # apply selections
+    sel_arrays = l1Tree.arrays(['ht', 'n_fatjet'])
+    ht = sel_arrays['ht']
+    n_fatjet = sel_arrays['n_fatjet']
+    cut = (ht>600) & (n_fatjet >= 2)
+    arrays = arrays[cut]  
+    nentries = np.count_nonzero(cut)  
 
     jet_record = ak.zip({"FatJets": ak.zip({ name : arrays[name] for name in varJets})})#
     pfcand_record = ak.zip({"pfcands": ak.zip({ name : arrays[name] for name in varPfcands})})
